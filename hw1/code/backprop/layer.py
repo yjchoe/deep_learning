@@ -11,7 +11,7 @@ class Layer(object):
     the hyperparameters for training. In the current implementation,
     this class is always instantiated by the `NN.__init__` method.
 
-    Attributes:
+    Attributes (comes from `NN.__init__`):
         __name__: string
             Name of the layer such as `layer3`.
         n_in: int
@@ -20,12 +20,14 @@ class Layer(object):
             Number of output units to the layer.
         learning_rate: function(epoch) or float
             A function that takes the current epoch number and returns 
-            a learning rate. Defaults to `momentum(eps=0.01, beta=0.5)`.
-            If a float `b` is provided, defaults to `lambda epoch: b`.
+            a learning rate. 
+        momentum: float (between 0 and 1)
+            Momentum parameter for exponential averaging of previous 
+            gradients.
         weight_decay: float
-            A weight decay / L2 regularization parameter. Defaults to `1`.
+            A weight decay / L2 regularization parameter.
         dropout: float (between 0 and 1)
-            Probability of a unit getting dropped out. Defaults to `0.5`.
+            Probability of a unit getting dropped out. 
         seed: float
             Random seed for initialization and dropout. 
 
@@ -41,7 +43,7 @@ class Layer(object):
         __init__, fprop, bprop
     """
     def __init__(self, name, n_in, n_out, 
-                 learning_rate, weight_decay, dropout, seed): 
+                 learning_rate, momentum, weight_decay, dropout, seed): 
         """
         Neural network layer initializer.
         """
@@ -51,13 +53,15 @@ class Layer(object):
         self.n_in          = n_in
         self.n_out         = n_out
         self.learning_rate = learning_rate
+        self.momentum      = momentum
         self.weight_decay  = weight_decay
         self.dropout       = dropout
         self.seed          = seed
 
         # Weight and bias initialization
         self.rng = np.random.RandomState(seed)
-        self.W = self.rng.normal(size=(n_out, n_in)) / np.sqrt(n_in)
+        c = np.sqrt(6. / (n_in + n_out))
+        self.W = self.rng.uniform(-c, c, size=(n_out, n_in))
         self.b = np.zeros((n_out, 1))
 
         # Stored values for backpropagation
@@ -76,7 +80,6 @@ class Layer(object):
         """
         raise NotImplementedError()
 
-
 class HiddenLayer(Layer):
     """A subclass of `Layer` for the hidden layers.
     See subclass `OutputLayer` for the output layer construction. 
@@ -94,19 +97,27 @@ class HiddenLayer(Layer):
     """
 
     def __init__(self, name, n_in, n_out, activation, 
-                 learning_rate, weight_decay, dropout, seed): 
+                 learning_rate, momentum, weight_decay, dropout, seed): 
         """
         Neural network hidden layer initializer.
         """
 
         # Initialization from the superclass
         super(HiddenLayer, self).__init__(
-            name, n_in, n_out, learning_rate, weight_decay, dropout, seed)
+            name, n_in, n_out, learning_rate, momentum, 
+            weight_decay, dropout, seed)
+
+        # Gradients (initially zero; set to matrices for momentum calculation)
+        self.grad_a_out = np.zeros((2, self.n_out))  # involves column-wise mean
+        self.grad_W     = 0.0
+        self.grad_decay = 0.0
+        self.grad_b     = 0.0
+        self.grad_h_in  = np.zeros((2, self.n_in))   # involves column-wise mean
 
         # Additional attributes
         self.activation = activation
-        self.h_in  = None
-        self.a_out = None
+        self.h_in       = None
+        self.a_out      = None
 
     def fprop(self, h_in, update_units=False):
         """
@@ -142,7 +153,15 @@ class HiddenLayer(Layer):
             self.h_in  = h_in
             self.a_out = a_out
 
-        return self.activation.eval(a_out)
+        h_out = self.activation.eval(a_out)
+
+        # Dropout
+        if update_units:
+            mask = self.rng.binomial(1, 1.-self.dropout, size=h_out.shape)
+        else:
+            # Taking expectation at test time
+            mask = (1.-self.dropout) * np.ones(h_out.shape)  
+        return h_out * mask
 
     def bprop(self, grad_h_out):
         """
@@ -171,18 +190,23 @@ class HiddenLayer(Layer):
         n = self.h_in.shape[0]
 
         # Compute gradients
-        grad_a_out = grad_h_out * self.activation.grad(self.a_out)
-        grad_W     = (1. / n) * grad_a_out.T.dot(self.h_in)
-        grad_decay = 2. * self.weight_decay * self.W
-        grad_b     = grad_a_out.mean(axis=0, keepdims=True).T
-        grad_h_in  = grad_a_out.dot(self.W)
+        self.grad_a_out = grad_h_out * self.activation.grad(self.a_out) \
+                            + self.momentum * self.grad_a_out.mean(axis=0)
+        self.grad_W     = (1. / n) * self.grad_a_out.T.dot(self.h_in) \
+                            + self.momentum * self.grad_W
+        self.grad_decay = 2. * self.weight_decay * self.W \
+                            + self.momentum * self.grad_decay
+        self.grad_b     = self.grad_a_out.mean(axis=0, keepdims=True).T \
+                            + self.momentum * self.grad_b
+        self.grad_h_in  = self.grad_a_out.dot(self.W) \
+                            + self.momentum * self.grad_h_in.mean(axis=0)
 
         # SGD Updates
         lr = self.learning_rate.get()
-        self.W = self.W - lr * (grad_W + grad_decay)
-        self.b = self.b - lr * (grad_b)
+        self.W = self.W - lr * (self.grad_W + self.grad_decay)
+        self.b = self.b - lr * (self.grad_b)
 
-        return grad_h_in
+        return self.grad_h_in
 
 class OutputLayer(Layer):
     """A subclass of `Layer` for the softmax output layer.
@@ -197,14 +221,21 @@ class OutputLayer(Layer):
     """
 
     def __init__(self, name, n_in, n_out, 
-                 learning_rate, weight_decay, dropout, seed): 
+                 learning_rate, momentum, weight_decay, dropout, seed): 
         """
         Neural network output layer initializer.
         """
 
         # Initialization from the superclass
         super(OutputLayer, self).__init__(
-            name, n_in, n_out, learning_rate, weight_decay, dropout, seed)
+            name, n_in, n_out, learning_rate, momentum, 
+            weight_decay, dropout, seed)
+
+        # Gradients (initially zero; set to matrices for momentum calculation)
+        self.grad_W     = 0.0
+        self.grad_decay = 0.0
+        self.grad_b     = 0.0
+        self.grad_h_in  = np.zeros((2, self.n_in))  # involves column-wise mean
 
         # Additional attributes
         self.h_in = None
@@ -245,7 +276,7 @@ class OutputLayer(Layer):
 
         # Softmax
         ex    = np.exp(a_out)
-        h_out = ex / ex.sum(axis=1, keepdims=True)
+        h_out = ex / (ex.sum(axis=1, keepdims=True) + 1e-8)
 
         return h_out
 
@@ -273,15 +304,19 @@ class OutputLayer(Layer):
         assert self.h_in.shape[0]  == grad_a_out.shape[0]
         n = self.h_in.shape[0]
 
-        # Compute gradients
-        grad_W     = (1. / n) * grad_a_out.T.dot(self.h_in)
-        grad_decay = 2. * self.weight_decay * self.W
-        grad_b     = grad_a_out.mean(axis=0, keepdims=True).T
-        grad_h_in  = grad_a_out.dot(self.W)
+        # Compute gradients and store them for next iteration (momentum)
+        self.grad_W     = (1. / n) * grad_a_out.T.dot(self.h_in) \
+                            + self.momentum * self.grad_W
+        self.grad_decay = 2. * self.weight_decay * self.W \
+                            + self.momentum * self.grad_decay
+        self.grad_b     = grad_a_out.mean(axis=0, keepdims=True).T \
+                            + self.momentum * self.grad_b
+        self.grad_h_in  = grad_a_out.dot(self.W) \
+                            + self.momentum * self.grad_h_in.mean(axis=0)
 
         # SGD Updates
         lr = self.learning_rate.get()
-        self.W = self.W - lr * (grad_W + grad_decay)
-        self.b = self.b - lr * (grad_b)
+        self.W = self.W - lr * (self.grad_W + self.grad_decay)
+        self.b = self.b - lr * (self.grad_b)
 
-        return grad_h_in
+        return self.grad_h_in

@@ -31,11 +31,12 @@ class NN(object):
             the corresponding instance of the `Activation` class.
         learning_rate: function(epoch) or float
             A function that takes the current epoch number and returns 
-            a learning rate. Defaults to `momentum(eps=0.01, beta=0.5)`.
-            If a float `b` is provided, defaults to `lambda epoch: b`.
-            Defaults to `0.1`.
+            a learning rate. Defaults to `lambda epoch: .1 / (epoch % 200 + 1.)`.
+        momentum: float (between 0 and 1)
+            Momentum parameter for exponential averaging of previous 
+            gradients.
         weight_decay: float
-            A weight decay / L2 regularization parameter. Defaults to `1.0`.
+            A weight decay / L2 regularization parameter. Defaults to `1e-4`.
         dropout: float (between 0 and 1)
             Probability of a unit getting dropped out. Defaults to `0.5`.
         early_stopping: boolean
@@ -54,13 +55,14 @@ class NN(object):
 
 
     Methods:
-        __init__, save, load, train, compute_error, predict
+        __init__, save, load, train, 
+        predict, compute_error, compute_cross_entropy
 
     """
 
-    def __init__(self, architecture=[784, 100, 100, 10], 
-                 activation='sigmoid', learning_rate=0.1, weight_decay=1.0, 
-                 dropout=0.5, early_stopping=True, seed=0):
+    def __init__(self, architecture=[784, 100, 10], 
+                 activation='sigmoid', learning_rate=0.1, momentum=0.5,
+                 weight_decay=1e-4, dropout=0.5, early_stopping=True, seed=99):
         """
         Neural network model initializer.
         """
@@ -69,6 +71,7 @@ class NN(object):
         self.architecture   = architecture
         self.activation     = activation
         self.learning_rate  = learning_rate
+        self.momentum       = momentum
         self.weight_decay   = weight_decay
         self.dropout        = dropout
         self.early_stopping = early_stopping
@@ -85,20 +88,22 @@ class NN(object):
         for i, (n_in, n_out) in enumerate(zip(architecture[:-2], 
                                               architecture[1:-1])):
             l = HiddenLayer('layer{}'.format(i), n_in, n_out, self.activation, 
-                            self.learning_rate, self.weight_decay, self.dropout, 
-                            self.seed+i)
+                            self.learning_rate, self.momentum, 
+                            self.weight_decay, self.dropout, self.seed+i)
             self.layers.append(l)
         # Output layer
         n_in, n_out = architecture[-2], architecture[-1]
         l = OutputLayer('output_layer', n_in, n_out, 
-                        self.learning_rate, self.weight_decay, self.dropout, 
-                        self.seed+i+1)
+                        self.learning_rate, self.momentum,
+                        self.weight_decay, self.dropout, self.seed+i+1)
         self.layers.append(l)
 
         # Training updates
         self.epoch = 0
-        self.training_error = {}
-        self.validation_error = {}
+        self.training_error = []
+        self.validation_error = []
+        self.training_loss = []
+        self.validation_loss = []
     
     def save(self, path):
         """
@@ -118,26 +123,28 @@ class NN(object):
             raise Exception('Loaded object is not a `NN` object.')
 
     def train(self, X, y, X_valid=None, y_valid=None,
-              batch_size=100, batch_seed=None):
-        """
-        Train the neural network with data.
+              batch_size=200, n_epoch=40, batch_seed=0, verbose=True):
+        """Train the neural network with data.
 
         Args:
             X: numpy.ndarray
                 Input data of size `n` (sample size) by `p` (data dimension).
             y: numpy.ndarray (binary)
-                One-hot labels of size `n` (sample size) by `k` (number of classes).
-            batch_size: int or None
-                If provided (default 64), training is performed on each batch.
-                Otherwise, training is done on the entire row of data.
+                One-hot labels of size `n` (sample size) by `k` (# classes).
             X_valid: numpy.ndarray
                 Optional validation data matrix. If provided with `y_valid`,
                 current validation error rate is stored in the model.
             y_valid: numpy.ndarray
                 Optional validation outcome vector. If provided with `X_valid`,
                 current validation error rate is stored in the model.
-            batch_seed: float
-                Random seed for batch selection.
+            batch_size: int
+                Size of random batches of the input data.
+            n_epoch: int
+                Number of epochs to train on the input data.
+            batch_seed: int
+                First random seed for batch selection.
+            verbose: bool
+                If true (default), report training updates per epoch to stdout.
         Returns:
             nn: NN
                 Trained `NN` model.
@@ -148,47 +155,87 @@ class NN(object):
         n = X.shape[0]
         n_batches = int(np.ceil(n / batch_size))
 
-        for i, batch in enumerate(generate_batches(n, batch_size, batch_seed)):
+        if verbose:
+            print('|-------|---------------------------|---------------------------|')
+            print('| Epoch |         Training          |         Validation        |')
+            print('|-------|---------------------------|---------------------------|')
+            print('|   #   |    Error    |  Cross-Ent  |    Error    |  Cross-Ent  |')
+            print('|-------|---------------------------|---------------------------|')
 
-            # Forward propagation (first h is input; last h is output)
-            h = X[batch, :]
+        for t in range(n_epoch):
+
+            for i, batch in enumerate(\
+                generate_batches(n, batch_size, batch_seed + t)):
+
+                # Forward propagation (last h is output prob)
+                h = X[batch, :]
+                for l in self.layers:
+                    h = l.fprop(h, update_units=True)
+
+                # Backpropagation
+                grad = -(y[batch, :] - h)
+                for l in self.layers[::-1]:
+                    grad = l.bprop(grad)
+
+            self.epoch += 1
             for l in self.layers:
-                h = l.fprop(h, update_units=True)
+                l.learning_rate.epoch = self.epoch
 
-            # Backpropagation
-            grad = -(y[batch, :] - h)
-            for l in self.layers[::-1]:
-                grad = l.bprop(grad)
+            # Errors
+            training_error = self.compute_error(X, y)
+            training_loss  = self.compute_cross_entropy(X, y)
+            self.training_error.append((self.epoch, training_error))
+            self.training_loss .append((self.epoch, training_loss ))
 
-        self.epoch += 1
-        print('Training Complete! ' + 
-              '({:d} examples, epoch {:d})'.format(n, self.epoch))
+            if X_valid is not None and y_valid is not None:
+                validation_error = self.compute_error(X_valid, y_valid)
+                validation_loss  = self.compute_cross_entropy(X_valid, y_valid)
+                self.validation_error.append((self.epoch, validation_error))
+                self.validation_loss .append((self.epoch, validation_loss))
+                if verbose:
+                    print('|  {:3d}  |   {:.5f}   |   {:.5f}   |   {:.5f}   |   {:.5f}   |'.\
+                        format(self.epoch, training_error, training_loss, 
+                               validation_error, validation_loss))
+                if self.early_stopping:
+                    if (self.epoch >= 40 and
+                        self.validation_loss[-2][1] < validation_loss and
+                        self.validation_loss[-3][1] < validation_loss and
+                        self.validation_loss[-4][1] < validation_loss):
+                        print('======Early stopping: validation loss increase at epoch {:3d}======'.\
+                            format(self.epoch))
+                        break
+            else:
+                if verbose:
+                    print('|  {:3d}  |   {:.5f}   |   {:.5f}   |             |             |'.\
+                        format(self.epoch, training_error, training_loss))
 
-        # Record and print training error
-        training_error = self.compute_error(X, y)
-        print('Training error: {:5f}'.format(training_error))
-        self.training_error[self.epoch] = training_error
-        # Record and print validation error (if data provided)
-        if X_valid is not None and y_valid is not None:
-            validation_error = self.compute_error(X_valid, y_valid)
-            print('Validation error: {:.5f}'.format(validation_error))
-            self.validation_error[self.epoch] = validation_error
+        if verbose:
+            print('|-------|---------------------------|---------------------------|')
 
         return self
 
 
-    def predict(self, X):
-        """
-        Predict labels using current model parameters.
+    def predict(self, X, output_type='response'):
+        """Predict labels using current model parameters.
 
         Args:
             X: numpy.ndarray
                 Input data to be predicted. 
                 Size `n` (sample size) by `p` (data dimension).
+            output_type: string
+                Type of output. 
+                'response' (default) returns predicted `y` as one-hot vectors.
+                'prob' or 'probability' returns the softmax probability.
         Returns:
-            y: numpy.ndarray (binary)
-                Predicted labels in one-hot format.
-                Size `n` (sample size) by `c` (number of classes).
+            One of the following:
+                y: numpy.ndarray (binary)
+                    Predicted labels in one-hot format, 
+                    if `output_type` is 'response'. (default)
+                    Size `n` (sample size) by `c` (number of classes).
+                p: numpy.ndarray
+                    Predicted softmax probabilities, 
+                    if `output_type` is 'prob'` or 'probability'.
+                    Size `n` (sample size) by `c` (number of classes).
         """
 
         assert self.layers[0].n_in == X.shape[1]
@@ -197,11 +244,15 @@ class NN(object):
         for l in self.layers:
             h = l.fprop(h)
 
-        return transform_y(np.argmax(h, axis=1), h.shape[1])
+        if output_type == 'response':
+            return transform_y(np.argmax(h, axis=1), h.shape[1])
+        elif output_type == 'prob' or output_type == 'probability':
+            return h
+        else:
+            raise Exception('NN.predict: unrecognized `output_type`')
 
     def compute_error(self, X, y):
-        """
-        Computes error rate on `X` and `y`.
+        """Computes error rate on `X` and `y`.
 
         Args:
             X: numpy.ndarray
@@ -216,3 +267,24 @@ class NN(object):
         """
         assert X.shape[0] == y.shape[0]
         return 1. - np.all(self.predict(X) == y, axis=1).mean()
+
+    def compute_cross_entropy(self, X, y):
+        """Computes the cross-entropy loss (negative log-likelihood) 
+        between `y` and `self.predict(X)`.
+
+        Args:
+            X: numpy.ndarray
+                Input data to be predicted. 
+                Size `n` (sample size) by `p` (data dimension).
+            y: numpy.ndarray (binary)
+                Labels in one-hot format.
+                Size `n` (sample size) by `c` (number of classes).
+        Returns:
+            loss: float
+                Mean cross-entropy loss over data.
+        """
+
+        assert X.shape[0] == y.shape[0]
+        p = self.predict(X, 'prob')
+
+        return -(y * np.log(p+1e-8)).mean()

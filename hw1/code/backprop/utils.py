@@ -4,6 +4,7 @@ Utility functions
 
 from __future__ import division
 import numpy as np
+from sklearn.preprocessing import StandardScaler
 
 def load_data(path_train, path_valid, path_test):
     """Loads data from three CSV files.
@@ -55,6 +56,24 @@ def transform_y(y, n_classes=None):
         raise Exception('utils.transform_y: ' +
                         'argument is not a proper outcome vector')
 
+def standardize_data(X):
+    """Standardize training inputs to zero mean and unit variance.
+    
+    A wrapper around `sklearn.preprocessing.StandardScaler()`.
+
+    Args:
+        X: numpy.ndarray
+            Training data matrix
+
+    Returns:
+        scaler: sklearn.preprocessing.StandardScaler
+            Scaler fitted to the training input data `X`.
+            Use `scaler.fit(X_new)` to transform your validation/testing data.
+            Use `scaler.mean_` and `scaler.scale_` for the original 
+            mean and standard deviation.
+    """
+    return StandardScaler().fit(X)
+
 def generate_batches(n, batch_size, batch_seed=None):
     """A generator for batches.
 
@@ -63,7 +82,7 @@ def generate_batches(n, batch_size, batch_seed=None):
             Total number of data points to choose from.
         batch_size: int
             Number of data points per batch.
-        batch_seed: float
+        batch_seed: int
             Random seed for ordering of data.
 
     Returns:

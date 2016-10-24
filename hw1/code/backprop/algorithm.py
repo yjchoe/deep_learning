@@ -5,20 +5,17 @@ Training algorithms and related classes
 import numpy as np
 
 class LearningRate(object):
-    """
-    TODO: Learning rate function class.
+    """Learning rate function class.
 
     Attributes:
         const: float
             Constant term for the learning rate.
-        momentum: float (between 0 and 1)
-            Momentum constant.
         epoch: int
-            Current epoch, which is the number of times that `NN.train`
-            was called.
+            Current epoch number, updated from `NN.train`.
     """
-    def __init__(self, lr):
-        self.lr = lr
+    def __init__(self, const, epoch=0):
+        self.lr    = lambda epoch: const / (epoch // 200 + 1.)
+        self.epoch = epoch
 
     def get(self):
-        return self.lr
+        return self.lr(self.epoch)
