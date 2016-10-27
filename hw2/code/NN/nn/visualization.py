@@ -6,7 +6,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 
-def print_image(X, output_shape=None):
+def print_image(X, output_shape=None, title=''):
     """Prints a set of 2D images of size d * d.
 
     Args:
@@ -44,4 +44,5 @@ def print_image(X, output_shape=None):
         ax.matshow(X[i, :].reshape(d, d)) # row-major
         ax.axis('off')
     fig.subplots_adjust(wspace=0, hspace=0)
+    fig.suptitle(title)
     return fig

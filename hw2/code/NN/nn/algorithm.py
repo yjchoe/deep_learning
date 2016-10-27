@@ -14,7 +14,7 @@ class LearningRate(object):
             Current epoch number, updated from `NN.train`.
     """
     def __init__(self, const, epoch=0):
-        self.lr    = lambda epoch: const / (epoch // 200 + 1.)
+        self.lr    = lambda epoch: const / (epoch // 100 + 1.)
         self.const = const
         self.epoch = epoch
 
