@@ -57,9 +57,9 @@ class DBM(object):
 
     Methods:
         __init__, save, load, train, 
-        generate_negative_sample, 
-        sample_from_posterior, sample_from_likelihood, 
-        compute_posterior, compute_likelihood, compute_cross_entropy
+        generate_negative_sample, run_gibbs,
+        sample_hidden1, sample_hidden2, sample_visible, 
+        compute_cross_entropy
 
     """
 
