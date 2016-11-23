@@ -8,10 +8,9 @@ import cPickle as pkl
 import os
 
 from scipy.special import expit
-from scipy.misc import logsumexp
 
 from nn.algorithm import LearningRate
-from nn.utils import transform_y, generate_batches
+from nn.utils import generate_batches
 
 class RBM(object):
     """A restricted Boltzmann machine class.
@@ -26,10 +25,10 @@ class RBM(object):
             Number of hidden units.
         k: int
             Number of Gibbs sampling steps in the CD-k algorithm.
-        learning_rate: `.nn.algorithm.LearningRate`
+        learning_rate: float or .nn.algorithm.LearningRate
             A function that takes the current epoch number and returns 
-            a learning rate. 
-            Defaults to `lambda epoch: const / (epoch // 200 + 1.)`.
+            a learning rate. `float` input becomes the `const` term.
+            Defaults to `lambda epoch: const / (epoch // 100 + 1.)`.
         early_stopping: boolean
             If true (default), attempts to stop training 
             before the validation error starts to increase.
@@ -48,12 +47,14 @@ class RBM(object):
 
     Methods:
         __init__, save, load, train, 
-        predict, compute_error, compute_cross_entropy
+        generate_negative_sample, 
+        sample_from_posterior, sample_from_likelihood, 
+        compute_posterior, compute_likelihood, compute_cross_entropy
 
     """
 
     def __init__(self, n_visible=784, n_hidden=100, k=1,
-                 learning_rate=0.1, early_stopping=True, seed=99):
+                 learning_rate=1.0, early_stopping=True, seed=99):
         """
         RBM model initializer.
         """
@@ -164,26 +165,28 @@ class RBM(object):
 
             # Cross-entropy error based on stochastic reconstructions 
             # using updated parameters
-            training_error = self.compute_cross_entropy(X_batch)
+            training_error = self.compute_cross_entropy(X)
             self.training_error.append((self.epoch, training_error))
 
             if X_valid is not None:
                 validation_error = self.compute_cross_entropy(X_valid)
                 self.validation_error.append((self.epoch, validation_error))
                 if verbose:
-                    print('|  {:3d}  |          {:.5f}         |          {:.5f}         |'.\
+                    print('|  {:3d}  |         {:9.5f}         |         {:9.5f}         |'.\
                         format(self.epoch, training_error, validation_error))
                 if self.early_stopping:
-                    if (self.epoch >= 40 and
-                        self.validation_error[-2][1] < validation_error and
-                        self.validation_error[-3][1] < validation_error and
-                        self.validation_error[-4][1] < validation_error):
+                    if (self.epoch >= 100 and
+                        1.02 * min(self.validation_error[-2][1],
+                                   self.validation_error[-3][1],
+                                   self.validation_error[-4][1],
+                                   self.validation_error[-5][1],
+                                   self.validation_error[-6][1]) < validation_error):
                         print('======Early stopping: validation error increase at epoch {:3d}====='.\
                             format(self.epoch))
                         break
             else:
                 if verbose:
-                    print('|  {:3d}  |          {:.5f}         |                           |'.\
+                    print('|  {:3d}  |         {:9.5f}         |                           |'.\
                         format(self.epoch, training_error))
 
         if verbose:
@@ -303,7 +306,7 @@ class RBM(object):
 
     def compute_cross_entropy(self, X):
         """Computes the cross-entropy error (negative log-likelihood) 
-        between `X` and its likelihood under the current model.
+        between `X` and the likelihood of the current model for that data.
 
         This gives the primary evaluation metric for RBMs.
         Note that the error is summed over the number of visible units and 
@@ -321,5 +324,6 @@ class RBM(object):
 
         assert self.n_visible == X.shape[1]
         H = self.sample_from_posterior(X)
-        L = self.compute_likelihood(H)
-        return -(X * np.log(L + 1e-8)).sum(axis=1).mean()
+        L = self.compute_likelihood(H)  # normalized between [0, 1]
+        return -(X * np.log(L + 1e-8) + 
+                 (1 - X) * np.log((1 - L) + 1e-8)).sum(axis=1).mean()
