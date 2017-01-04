@@ -1,2 +1,24 @@
 # deep_learning
-Coursework for 10-807 Deep Learning at CMU, Fall 2016
+
+Python implementation of feedforward neural networks, restricted Boltzmann machines, deep Boltzmann machines, and autoencoders _from scratch_. For (much) more scalable implementations of these models, please see Theano, Torch, TensorFlow, or other standard deep learning libraries. 
+
+This project was done as part of ![this course](http://www.cs.cmu.edu/~rsalakhu/10807_2016/).
+
+### Dependencies
+
+The only dependencies outside of the Python standard library are:
+
+* `scipy.special.expit`
+* `sklearn.preprocessing.StandardScaler`
+
+Both of these functions can easily be replaced with NumPy functions.
+
+### Getting started
+
+* `code` directory contains the package `NN`, which includes implementations of 
+    * basic feedforward neural networks (`code/nn/`),
+    * restricted Boltzmann machines (`code/rbm.py`), 
+    * deep Boltzmann machines (`code/dbm.py`), and
+    * autoencoders and denoising autoencoders (`code/autoencoder.py`).
+
+* Scripts and analyses of these neural networks can be found in the `notebooks` directory. 
