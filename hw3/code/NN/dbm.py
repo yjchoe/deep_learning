@@ -122,12 +122,12 @@ class DBM(object):
             pkl.dump(self, f)
 
     @staticmethod
-    def load(path_dir):
+    def load(path):
         """
         Load a model saved by the function `save`.
         """
-        with open(fname) as f:
-            rbm = pkl.load(f)
+        with open(path) as f:
+            dbm = pkl.load(f)
         if isinstance(dbm, DBM):
             return dbm
         else:

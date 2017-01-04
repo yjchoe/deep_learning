@@ -113,11 +113,11 @@ class NN(object):
             pkl.dump(self, f)
 
     @staticmethod
-    def load(path_dir):
+    def load(path):
         """
         Load a model saved by the function `save`.
         """
-        with open(fname) as f:
+        with open(path) as f:
             rbm = pkl.load(f)
         if isinstance(nn, NN):
             return nn

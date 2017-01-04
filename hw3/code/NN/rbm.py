@@ -85,7 +85,7 @@ class RBM(object):
         self.c = np.zeros((n_visible, 1))
 
         # Persistent chain initialization
-        if persistent:
+        if self.persistent:
             self.X_neg = None
 
         # Training updates
@@ -101,11 +101,11 @@ class RBM(object):
             pkl.dump(self, f)
 
     @staticmethod
-    def load(path_dir):
+    def load(path):
         """
         Load a model saved by the function `save`.
         """
-        with open(fname) as f:
+        with open(path) as f:
             rbm = pkl.load(f)
         if isinstance(rbm, RBM):
             return rbm
@@ -143,6 +143,10 @@ class RBM(object):
         n = X.shape[0]
         n_batches = int(np.ceil(n / batch_size))
 
+        if self.persistent and self.X_neg is None:
+            self.X_neg = self.rng.binomial(1, 0.5, 
+                                           size=(batch_size, self.n_visible))
+
         if verbose:
             print('|-------|---------------------------|---------------------------|')
             print('| Epoch |         Training          |         Validation        |')
@@ -157,7 +161,7 @@ class RBM(object):
 
                 # Get X in the current batch and its negative samples
                 X_batch = X[batch, :]
-                if persistent:
+                if self.persistent:
                     X_neg = self.generate_negative_sample(self.X_neg)
                 else:
                     X_neg = self.generate_negative_sample(X_batch)
@@ -175,7 +179,7 @@ class RBM(object):
                 self.b += lr * grad_b
                 self.c += lr * grad_c
 
-                if persistent:
+                if self.persistent:
                     self.X_neg = X_neg
 
             self.epoch += 1
