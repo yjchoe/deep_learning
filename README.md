@@ -1,6 +1,6 @@
 # deep_learning
 
-Python implementations of feedforward neural networks, restricted Boltzmann machines, deep Boltzmann machines, and autoencoders _from scratch_. For (much) more scalable implementations of these models, see standard deep learning libraries such as Theano and TensorFlow. 
+Python implementations of feedforward neural networks, restricted Boltzmann machines, deep Boltzmann machines, and autoencoders from scratch. For (much) more scalable implementations of these models, see standard deep learning libraries such as Theano and TensorFlow. 
 
 This project was done as part of [this course](http://www.cs.cmu.edu/~rsalakhu/10807_2016/).
 
